@@ -25,4 +25,4 @@ specials := "#" | "-" | "." | "," | "|" | "\\" | "\"" | "'" | "+" | "~"
 
 allowed_char := characters | whitespace | newline | specials
 
-comment := "<!--" allowed_char* "--!>"
+comment := "<!--" allowed_char* "-->"
