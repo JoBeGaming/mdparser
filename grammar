@@ -20,6 +20,8 @@ newline := "\n"
 
 heading := "#"+ (word | number | float | whitespace)* newline
 
+table := ("|" whitespace* word*)+
+
 
 specials := "#" | "-" | "." | "," | "|" | "\\" | "\"" | "'" | "+" | "~"
 
