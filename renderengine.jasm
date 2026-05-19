@@ -1,7 +1,9 @@
 ; TODO: We assume RPRE takes register as 3rd OP
 ; TODO: If we had ANDI, ORI, XORI, RSHI, LSHI we could get away without a flag register (i guess), and maybe even more!
 
-; Assume following functions
+; TODO: Following functions:
+.def _raise_stack_overflow
+.def _raise_stack_underflow
 .def toggle_bold
 .def toggle_italic
 .def increment_size
@@ -150,10 +152,6 @@
     ret
 
 
-.def putchar
-    ...
-
-
 .def get_cb
     ; flag = int_state & _CB_FLAG
     ldi     _CB_FLAG flag
@@ -272,8 +270,18 @@
     ; NOTE: You cannot escape a comment (i.e.: `<!--` or `-->`). Therefore we
     ;       check for us being inside a comment first. This is why step 1 only
     ;       filters out comments.
+
+    ; Reset copy's 1st bit.
+    ldi     0b1111_1110 tmp
+    and     tmp copy copy
+
     call    in_comment
-    branch  + ~neq
+    branch  +2 ~neq
+        ; Set copy's 1st bit.
+        ldi     0b0000_0001 tmp1
+        or      tmp1 copy copy
+
+    branch  +55 ~neq
         ; Reset copy's 2nd bit.
         ldi     0b1111_1101 tmp
         and     tmp copy copy
@@ -288,7 +296,7 @@
             or      tmp1 copy copy
 
         branch  +5 ~neq
-            ; CE == 0
+            ; CE == 0, expect "-".
             ldi     CHAR_COMMENT_E_0 target
             cmpr    current_char target ~neq
             branch  +2 ~neq
@@ -300,7 +308,7 @@
         ldi     0b0000_0010 tmp1
         and     tmp1 copy tmp1
         cmpr    tmp1 r0 ~neq
-        branch  + ~neq
+        branch  +37 ~neq
             ; CE != 0
 
             ; Reset copy's 3rd bit.
@@ -315,7 +323,7 @@
                 or      tmp1 copy copy
 
             branch  +7 ~neq
-                ; CE == 1
+                ; CE == 1, expect "-".
                 ldi     CHAR_COMMENT_E_1 target
                 cmpr    current_char target ~neq
                 branch  +2 ~neq
@@ -331,12 +339,232 @@
             ldi     0b0000_0100 tmp1
             and     tmp1 copy tmp1
             cmpr    tmp1 r0 ~neq
-            branch + ~neq
-                ; CE != 1 (and CE != 0)
-                ...
+            branch  +18 ~neq
+                ; CE == 2
 
+                ; Reset copy's 4th bit.
+                ldi     0b1111_0111 tmp1
+                and     tmp1 copy copy
+
+                ; Expect ">".
+                ldi     CHAR_COMMENT_E_2 target
+                cmpr    current_char target ~neq
+                branch  +2 ~neq
+                    ; Set copy's 4th bit.
+                    ldi     0b0000_1000 tmp1
+                    or      tmp1 copy copy
+
+                branch  +2 ~neq
+                    ; Character is ">", end the comment.
+                    call    reset_cb
+                    call    reset_ce
+
+                ; Check wether we had ~neq or ~eq before.
+                ; IF copy[-4] == 0: NEQ
+                ldi     0b0000_1000 tmp1
+                and     tmp1 copy tmp1
+                cmpr    tmp1 r0 ~neq
+                branch  +4 ~neq
+                    ; If character is "-", we keep CE at 2,
+                    ; so e.g. `--->` is allowed.
+                    ldi     CHAR_COMMENT_E_1 target
+                    cmpr    current_char target ~eq
+                    branch  +1 ~eq
+                        call    reset_ce
+
+                    ; CE is still 2.
+
+    ; Check wether we had ~neq or ~eq before.
+    ; IF copy[-1] == 0: NEQ
+    ldi     0b0000_0001 tmp1
+    and     tmp1 copy tmp1
+    cmpr    tmp1 r0 ~neq
+    branch  +106 ~neq
+        ; Reset copy's 2nd bit.
+        ldi     0b1111_1101 tmp
+        and     tmp copy copy
+
+        call    get_cb
+        pop     tmp
+
+        cmpr    tmp r0 ~neq
+        branch  +2 ~neq
+            ; Set copy's 2nd bit.
+            ldi     0b0000_0010 tmp1
+            or      tmp1 copy copy
+
+        branch  +16 ~neq
+            ; Reset copy's 3rd bit.
+            ldi     0b1111_1011 tmp1
+            and     tmp1 copy copy
+
+            ; CB == 0, expect "<".
+            ldi     CHAR_COMMENT_B_0 target
+            cmpr    current_char target ~neq
+            branch  +2 ~neq
+                ; Set copy's 3rd bit.
+                ldi     0b0000_0100 tmp1
+                or      tmp1 copy copy
+
+            branch  +2 ~neq
+                pshi    0x01
+                call    set_cb
+
+            ; Check wether we had ~neq or ~eq before.
+            ; IF copy[-3] == 0: NEQ
+            ldi     0b0000_0100 tmp1
+            and     tmp1 copy tmp1
+            cmpr    tmp1 r0 ~neq
+            branch  +2 ~neq
+                ; Go into step 2.
+                psh     current_char
+                call    process_char_s2
+
+        ; Check wether we had ~neq or ~eq before.
+        ; IF copy[-2] == 0: NEQ
+        ldi     0b0000_0010 tmp1
+        and     tmp1 copy tmp1
+        cmpr    tmp1 r0 ~neq
+        branch  +77 ~neq
+            ; CB != 0
+
+            ; Reset copy's 3rd bit.
+            ldi     0b1111_1011 tmp1
+            and     tmp1 copy copy
+
+            ldi     0x01 tmp1
+            cmpr    tmp tmp1 ~neq
+            branch  +2 ~neq
+                ; Set copy's 3rd bit.
+                ldi     0b0000_0100 tmp1
+                or      tmp1 copy copy
+
+            branch  +16 ~neq
+                ; CB == 1, expect "!".
+
+                ; Reset copy's 4th bit.
+                ldi     0b1111_0111 tmp1
+                and     tmp1 copy copy
+
+                ldi     CHAR_COMMENT_B_1 target
+                cmpr    current_char target ~neq
+                branch  +2 ~neq
+                    ; Set copy's 4th bit.
+                    ldi     0b0000_1000 tmp1
+                    or      tmp1 copy copy
+
+                branch  +2 ~neq
+                    pshi    0x02
+                    call    set_cb
+
+                ; Check wether we had ~neq or ~eq before.
+                ; IF copy[-4] == 0: NEQ
+                ldi     0b0000_1000 tmp
+                and     tmp1 copy tmp1
+                cmpr    tmp1 r0 ~neq
+                branch  +4 ~neq
+                    call    flush_partial_cb
+                    call    reset_cb
+
+                    ; Go into step 2.
+                    psh     current_char
+                    call    process_char_s2
+
+            ; Check wether we had ~neq or ~eq before.
+            ; IF copy[-3] == 0: NEQ
+            ldi     0b0000_0100 tmp1
+            and     tmp1 copy tmp1
+            cmpr    tmp1 r0 ~neq
+            branch  +48 ~neq
+                ; CB != 1 (and CB != 0)
+
+                ; Reset copy's 4th bit.
+                ldi     0b1111_0111 tmp1
+                and     tmp1 copy copy
+
+                ldi     0x02 tmp1
+                cmpr    tmp tmp1 ~neq
+                branch  +2 ~neq
+                    ; Set copy's 4th bit.
+                    ldi     0b0000_1000 tmp1
+                    or      tmp1 copy copy
+
+                branch  +18 ~neq
+                    ; CB == 2, expect "-".
+
+                    ; reset copy's 5th bit.
+                    ldi     0b1110_1111 tmp1
+                    and     tmp1 copy copy
+
+                    ldi     CHAR_COMMENT_B_2 target
+                    cmpr    current_char target ~neq
+                    branch  +2 ~neq
+                        ; Set copy's 5th bit.
+                        ldi     0b0001_0000 tmp1
+                        or      tmp1 copy copy
+
+                    branch  +2 ~neq
+                        pshi    0x03
+                        call    set_cb
+
+                    ; Check wether we had ~neq or ~eq before.
+                    ; IF copy[-5] == 0: NEQ
+                    ldi     0b0001_0000 tmp1
+                    and     tmp1 copy tmp1
+                    cmpr    tmp1 r0 ~neq
+                    branch  +4 ~neq
+                        call    flush_partial_cb
+                        call    reset_cb
+
+                        ; Go into step 2.
+                        psh     current_char
+                        call    process_char_s2
+
+                ; Check wether we had ~neq or ~eq before.
+                ; IF copy[-4] == 0: NEQ
+                ldi     0b0000_1000 tmp1
+                and     tmp1 copy tmp1
+                cmpr    tmp1 r0 ~neq
+                branch  +18 ~neq
+                    ; CB != 2 (and CB != 1 and CB != 0). We know CB == 3,
+                    ; other values are not valid.
+
+                    ; Reset copy's 5th bit.
+                    ldi     0b1110_1111 tmp1
+                    and     tmp1 copy copy
+
+                    ldi     CHAR_COMMENT_B_3 target
+                    cmpr    current_char target ~neq
+                    branch  +2 ~neq
+                        ; Set copy's 5th bit.
+                        ldi     0b0001_0000 tmp1
+                        or      tmp1 copy copy
+
+                    branch  +2 ~neq
+                        pshi    0x04
+                        call    set_cb
+
+                    ; Check wether we had ~neq or ~eq before.
+                    ; IF copy[-5] == 0: NEQ
+                    ldi     0b0001_0000 tmp1
+                    and     tmp1 copy tmp1
+                    cmpr    tmp1 r0 ~neq
+                    branch  +4 ~neq
+                        call    flush_partial_cb
+                        call    reset_cb
+
+                        ; Go into step 2.
+                        psh     current_char
+                        call    process_char_s2
+
+    call    in_comment
+    branch  +1 ~eq
+        call    flush_partial_cb
+
+    ret
 
 ; TBD: ...
+; TODO: SIMPLIFY ELSE LOGIC WHEN IF CASE HAS NO WAY TO MODIFY FLAG
 
 .def mainloop
     ; FOR char IN chars
