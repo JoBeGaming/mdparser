@@ -1,0 +1,396 @@
+; TODO: We assume RPRE takes register as 3rd OP
+; TODO: If we had ANDI, ORI, XORI, RSHI, LSHI we could get away without a flag register (i guess), and maybe even more!
+
+; Assume following functions
+.def toggle_bold
+.def toggle_italic
+.def increment_size
+.def underline
+.def _putchar
+.def _putcharn
+
+
+; Following flags exist:
+;   - S: Size (0-7)
+;   - B: Bold
+;   - I: Italic
+;   - C: Code snippet (`...`)
+;   - X: Code block (```lang\n...```)
+.define S_FLAG                                                      0b0000_0111 ; 0: Smallest (DEFAULT), 7: Biggest
+.define B_FLAG                                                      0b0000_1000
+.define I_FLAG                                                      0b0001_0000
+.define C_FLAG                                                      0b0010_0000
+.define X_FLAG                                                      0b0100_0000
+
+; TODO: Register to indicate TABLE context settings
+
+; NOTE: WE STILL HAVE A SINGLE BIT!!
+; IDEAS:
+;     - LINK?! (BASICALLY JUST MARK BLUE + SEND REQ WHEN CLICKED) (LINK ONLY TRAVERSES FS)
+;     - STRIKETHROUGH
+
+.define STACK_L                                                             @01
+.define STACK_H                                                             @00
+
+.define STACK_MAX                                                          0xFF
+
+.define current_char                                                         $1 ; Current character as a byte
+.define char_position                                                        $2 ; TODO: Handling for >256 Chars
+.define stack_ptr                                                            $3
+
+.define target                                                               $4
+
+; TODO: RENAME TO TMP0
+.define tmp                                                                  $5
+.define tmp1                                                                 $6
+.define flag                                                                 $7
+
+.define copy                                                                 $8
+
+; Note: The Flags defined for stack frames are the same used here.
+.define state                                                                $9
+
+; Internal state: Non-visible state flags, e.g.:
+;   - escaped
+;   - comment begin (0-4)
+;   - comment end   (0-3)
+.define int_state                                                            $10
+
+; E.g.:
+;   0bABCD_E011
+; & 0b1111_1000
+; = 0bABCD_E000
+
+
+; NOTE: `-` is present twice, as we expect 3rd or 4th position in beginning sequence.
+;
+; +-----------+-----------+---------------------------+---------------------------------------------------------------------------------+
+; | character | set cb to | condition                 | otherwise                                                                       |
+; +-----------+-----------+---------------------------+---------------------------------------------------------------------------------+
+; | any       | 0         | int_state & _CB_FLAG < 4  |                                                                                 |
+; | <         | 1         | int_state & _CB_FLAG == 0 | PASS IF (int_state & _CB_FLAG == 4) ELSE (int_state &= ~_CB_FLAG; putchars())   |
+; | !         | 2         | int_state & _CB_FLAG == 1 | PASS IF (int_state & _CB_FLAG == 4) ELSE (int_state &= ~_CB_FLAG; putchars())   |
+; | -         | 3         | int_state & _CB_FLAG == 2 | PASS IF (int_state & _CB_FLAG == 4) ELSE (int_state &= ~_CB_FLAG; putchars())   |
+; | -         | 4         | int_state & _CB_FLAG == 3 | PASS IF (int_state & _CB_FLAG == 4) ELSE (int_state &= ~_CB_FLAG; putchars())   |
+; +-----------+-----------+---------------------------+---------------------------------------------------------------------------------+
+
+.define _E_FLAG                                                     0b0000_1000
+.define _CB_FLAG                                                    0b0000_0111 ; n characters match a beginning comment (0-4)
+.define _CE_FLAG                                                    0b0011_0000 ; n characters match an ending comment (0-2)
+
+.define _N_CB_FLAG                                                  0b1111_1000
+.define _N_CE_FLAG                                                  0b1100_1111
+
+; TODO: ...
+.define chars_l                                                             @12
+.define chars_h                                                             @34
+
+.define CHAR_ESCAPE                                                        "\\"
+.define CHAR_HASHTAG                                                        "#"
+.define CHAR_STAR                                                           "*"
+.define CHAR_UNDERSCORE                                                     "_"
+.define CHAR_BACKTICK                                                       "`"
+
+
+.define CHAR_COMMENT_B_0                                                    "<"
+.define CHAR_COMMENT_B_1                                                    "!"
+.define CHAR_COMMENT_B_2                                                    "-"
+.define CHAR_COMMENT_B_3                                                    "-"
+
+.define CHAR_COMMENT_E_0                                                    "-"
+.define CHAR_COMMENT_E_1                                                    "-"
+.define CHAR_COMMENT_E_2                                                    ">"
+
+
+.def push_context
+    ldi     0xff tmp
+    cmpr    stack_ptr tmp ~neq
+    branch  +1 ~neq
+        ; fail: We cannot PSH any further, as the SP is at 0xFF already,
+        ;       and the next PSH would cause an overflow.
+
+        ; Note: _raise_stack_overflow does NOT return.
+        call    _raise_stack_overflow
+
+    addi    0x01 stack_ptr stack_ptr
+    rpre    STACK_L STACK_H stack_ptr
+
+    ; Context Frame should be on the stack.
+    pop     tmp
+    str     @00 @00 tmp
+    ret
+
+
+.def pop_context
+    cmpr    stack_ptr r0 ~neq
+    branch  +1 ~neq
+        ; fail: We cannot POP any further, as the SP is at 0x00 already,
+        ;       and the next POP would cause an underflow.
+
+        ; Note: _raise_stack_underflow does NOT return.
+        call    _raise_stack_underflow
+
+    subi    0x01 stack_ptr stack_ptr
+    rpre    STACK_L STACK_H stack_ptr
+
+    lod     @00 @00 tmp
+
+    ; Context Frame should be on the stack.
+    psh     tmp
+    ret
+
+
+.def peek_context
+    ; NOTE: This raises stack underflow if the stack is empty.
+    call    pop_context
+    call    push_context
+
+    ; Implementation detail, keeps stack mostly intact though.
+    psh     tmp
+    ret
+
+
+.def putchar
+    ...
+
+
+.def get_cb
+    ; flag = int_state & _CB_FLAG
+    ldi     _CB_FLAG flag
+    and     int_state flag flag
+    psh     flag
+    ret
+
+
+.def set_cb
+    ; int_state = (int_state & _N_CB_FLAG) | tmp
+    pop     tmp
+    ldi     _N_CB_FLAG flag
+    and     int_state flag flag
+    or      flag tmp int_state
+    ret
+
+
+.def reset_cb
+    ; int_state = (int_state & _N_CB_FLAG) | 0x00
+    ldi     _N_CB_FLAG flag
+    and     int_state flag int_state
+    ret
+
+
+.def get_ce
+    ; flag = (int_state & _CE_FLAG) >> 4
+    ldi     _CE_FLAG flag
+    ldi     0x04 tmp
+    and     int_state flag flag
+    rsh     flag tmp flag
+    psh     flag
+    ret
+
+
+.def set_ce
+    ; int_state = (int_state & _N_CE_FLAG) | (tmp << 4)
+    pop     tmp
+    ldi     0x04 flag
+    lsh     tmp flag tmp
+    ldi     _N_CE_FLAG flag
+    and     int_state flag flag
+    or      flag tmp int_state
+    ret
+
+
+.def reset_ce
+    ; int_state = (int_state & _N_CE_FLAG) | 0x00
+    ldi     _N_CE_FLAG flag
+    and     int_state flag int_state
+    ret
+
+
+.def in_comment
+    ; Set the flags ~eq = 1 and ~neq = 0
+    ; if we currently are in a comment.
+    ; Otherwise, ~eq = 0 and ~neq = 1.
+    call    get_cb
+    pop     flag
+    ldi     0x04 tmp
+    cmpr    flag tmp ~eq
+    cmpr    flag tmp ~neq
+
+
+.def flush_partial_cb
+    ; put rest of `<!--` on screen if the comment start failed.
+    call    get_cb
+    pop     tmp
+
+    cmpr    tmp r0 ~neq
+    branch  +1 ~neq
+        ret
+
+    ldi     0x01 flag
+    cmpr    tmp flag ~neq
+    branch  +3 ~neq
+        pshi    "<"
+        call    putchar
+        ret
+
+    ldi     0x02 flag
+    cmpr    tmp flag ~neq
+    branch  +5 ~neq
+        pshi    "<"
+        call    putchar
+        pshi    "!"
+        call    putchar
+        ret
+
+    ldi     0x03 flag
+    cmpr    tmp flag ~neq
+    branch  +7 ~neq
+        pshi    "<"
+        call    putchar
+        pshi    "!"
+        call    putchar
+        pshi    "-"
+        call    putchar
+        ret
+
+    ; tmp == 4, as it cannot be bigger
+    pshi    "<"
+    call    putchar
+    pshi    "!"
+    call    putchar
+    pshi    "-"
+    call    putchar
+    pshi    "-"
+    call    putchar
+    ret
+
+
+.def process_char_s1
+    ; Filter out comments
+    pop     current_char
+
+    ; NOTE: You cannot escape a comment (i.e.: `<!--` or `-->`). Therefore we
+    ;       check for us being inside a comment first. This is why step 1 only
+    ;       filters out comments.
+    call    in_comment
+    branch  + ~neq
+        ; Reset copy's 2nd bit.
+        ldi     0b1111_1101 tmp
+        and     tmp copy copy
+
+        call    get_ce
+        pop     tmp
+
+        cmpr    tmp r0 ~neq
+        branch  +2 ~neq
+            ; Set copy's 2nd bit.
+            ldi     0b0000_0010 tmp1
+            or      tmp1 copy copy
+
+        branch  +5 ~neq
+            ; CE == 0
+            ldi     CHAR_COMMENT_E_0 target
+            cmpr    current_char target ~neq
+            branch  +2 ~neq
+                pshi    0x01
+                call    set_ce
+
+        ; Check wether we had ~neq or ~eq before.
+        ; IF copy[-2] == 0: NEQ
+        ldi     0b0000_0010 tmp1
+        and     tmp1 copy tmp1
+        cmpr    tmp1 r0 ~neq
+        branch  + ~neq
+            ; CE != 0
+
+            ; Reset copy's 3rd bit.
+            ldi     0b1111_1011 tmp1
+            and     tmp1 copy copy
+
+            ldi     0x01 tmp1
+            cmpr    tmp tmp1 ~neq
+            branch  +2 ~neq
+                ; Set copy's 3rd bit.
+                ldi     0b0000_0100 tmp1
+                or      tmp1 copy copy
+
+            branch  +7 ~neq
+                ; CE == 1
+                ldi     CHAR_COMMENT_E_1 target
+                cmpr    current_char target ~neq
+                branch  +2 ~neq
+                    pshi    0x02
+                    call    set_ce
+
+                ; NEQ
+                branch  +1 ~eq
+                    call    reset_ce
+
+            ; Check wether we had ~neq or ~eq before.
+            ; IF copy[-3] == 0: NEQ
+            ldi     0b0000_0100 tmp1
+            and     tmp1 copy tmp1
+            cmpr    tmp1 r0 ~neq
+            branch + ~neq
+                ; CE != 1 (and CE != 0)
+                ...
+
+
+; TBD: ...
+
+.def mainloop
+    ; FOR char IN chars
+    ;     process_char(char)
+    rpre    chars_l chars_h char_position
+    lod     @00 @00 current_char
+
+    psh     current_char
+    call    process_char
+    ; IF ~zero:
+    ;    BREAK
+    branch  +2 ~zero
+        call    inc_charpos
+        call    mainloop
+
+    ret
+
+
+.def process_char
+    pop     current_char
+
+    ; NOTE: You cannot escape a comment (i.e.: `<!--` or `-->`). Therefore we
+    ;       check for us being inside a comment first.
+    ldi    
+
+    ; flag = int_state & _E_FLAG
+    ldi     _E_FLAG flag
+    and     int_state flag flag
+
+    cmpr    flag r0 ~eq
+    branch  +2 ~eq
+        ; Current character got escaped.
+
+        ; if (!contains(ESCAPABLE_CHARS, char) {
+        ;     putchar(CHAR_ESCAPE);
+        ;     putchar(char);
+        ; } else {
+        ;     putchar(char);
+        ; }
+        psh     current_char
+        call    is_escapable
+
+        ; If `is_escapable` returned 0x00, the character cannot be escaped.
+        pop     flag
+        cmpr    flag r0 ~eq
+        branch  
+
+
+
+    pop     current_char
+
+    ldi     star target
+    cmpr    current_char target ~neq
+    branch  +1 ~neq
+        call    handle_star
+
+    
