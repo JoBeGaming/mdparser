@@ -19,7 +19,7 @@
 ;   - C: Code snippet (`...`)
 ;   - X: Code block (```lang\n...```)
 ;   - S: Strikethrough
-.define H_FLAG                                                      0b0000_0111 ; 0: Smallest (DEFAULT), 7: Biggest
+.define H_FLAG                                                              0b0000_0111 ; 0: Smallest (DEFAULT), 7: Biggest
 .define B_FLAG                                                      0b0000_1000
 .define I_FLAG                                                      0b0001_0000
 .define C_FLAG                                                      0b0010_0000
@@ -84,9 +84,9 @@
 ;   - comment end   (0-3)
 ;   - eol
 ;   - do_line
-.define int_state                                                            $10
+.define int_state                                                            $A
 
-.define tmp2                                                                 $11
+.define tmp2                                                                 $B
 
 ; E.g.:
 ;   0bABCD_E011
@@ -142,6 +142,29 @@
 .define CHAR_TABLE_H_E_0                                                    "|"
 .define CHAR_TABLE_H_E_1                                               CHAR_EOL
 
+
+; pushing only means a single change is commited / uncommited,
+; e.g.: EN_I, DI_I INC_COL, INC_ROW, ...
+
+; (change & KIND_FLAG) == {ME|EN|DI}_FLAG
+
+.define KIND_FLAG                                                   0b1100_0000
+.define ME_FLAG                                                     0b0000_0000
+.define EN_FLAG                                                     0b1000_0000
+.define DI_FLAG                                                     0b1100_0000
+
+; META
+.define INC_SIZE                                                    0b0000_0001
+.define INC_COL                                                     0b0000_0010
+.define INC_ROW                                                     0b0000_0011
+.define LANGID                                                      0b0000_0100 ; Next Token is 0x00 - 0xff as LANGID
+
+.define EN_I                                                        0b1000_0001
+.define EN_B                                                        0b1000_0010
+.define EN_C                                                        0b1000_0011
+.define EN_X                                                        0b1000_0100
+.define EN_S                                                        0b1000_0101
+.define DI_I                                                        0b1100_0001
 
 .def push_context
     ldi     0xff tmp
@@ -312,7 +335,6 @@
     ; int_state &= ~_EOL_FLAG
     ldi    _N_EOL_FLAG flag
     and    int_state flag int_state
-    ret
 
 
 .def in_comment
@@ -338,38 +360,38 @@
     ldi     0x01 flag
     cmpr    tmp flag ~neq
     branch  +3 ~neq
-        pshi    "<"
+        pshi    CHAR_COMMENT_B_0
         call    putchar
         ret
 
     ldi     0x02 flag
     cmpr    tmp flag ~neq
     branch  +5 ~neq
-        pshi    "<"
+        pshi    CHAR_COMMENT_B_0
         call    putchar
-        pshi    "!"
+        pshi    CHAR_COMMENT_B_1
         call    putchar
         ret
 
     ldi     0x03 flag
     cmpr    tmp flag ~neq
     branch  +7 ~neq
-        pshi    "<"
+        pshi    CHAR_COMMENT_B_0
         call    putchar
-        pshi    "!"
+        pshi    CHAR_COMMENT_B_1
         call    putchar
-        pshi    "-"
+        pshi    CHAR_COMMENT_B_2
         call    putchar
         ret
 
     ; tmp == 4, as it cannot be bigger
-    pshi    "<"
+    pshi    CHAR_COMMENT_B_0
     call    putchar
-    pshi    "!"
+    pshi    CHAR_COMMENT_B_1
     call    putchar
-    pshi    "-"
+    pshi    CHAR_COMMENT_B_2
     call    putchar
-    pshi    "-"
+    pshi    CHAR_COMMENT_B_3
     call    putchar
     ret
 
@@ -740,7 +762,7 @@
         branch  +1 ~neq
             call    inc_ht_count
 
-        ; ... possibly more
+        ; ... possibly more hooks for EOL before
 
     ; Check wether we had ~neq or ~eq before.
     ; IF copy[-6] == 0: NEQ
@@ -749,7 +771,7 @@
     cmpr    tmp1 r0 ~neq
     branch  + ~neq
         ; Previous character was NOT EOL.
-            cmpr 
+        cmpr    ...
 
 
 
@@ -757,19 +779,24 @@
 ; TBD: ...
 ; TODO: SIMPLIFY ELSE LOGIC WHEN IF CASE HAS NO WAY TO MODIFY FLAG
 
+; TODO: We might want to make this not be recursive, as the callstack is (obviously) limited
 .def mainloop
-    ; FOR char IN chars
-    ;     process_char(char)
     rpre    chars_l chars_h char_position
     lod     @00 @00 current_char
 
     psh     current_char
     call    process_char
+
     ; IF ~zero:
     ;    BREAK
     branch  +2 ~zero
         call    inc_charpos
         call    mainloop
+
+    ret
+
+.def main
+    call    mainloop
 
     ; TODO: THIS IS OUTSIDE THE LOOP, AFTER WE ARE DONE
     call    in_comment
@@ -784,7 +811,7 @@
 
     ; NOTE: You cannot escape a comment (i.e.: `<!--` or `-->`). Therefore we
     ;       check for us being inside a comment first.
-    ldi    
+    ldi     ...
 
     ; flag = int_state & _E_FLAG
     ldi     _E_FLAG flag
@@ -806,9 +833,7 @@
         ; If `is_escapable` returned 0x00, the character cannot be escaped.
         pop     flag
         cmpr    flag r0 ~eq
-        branch  
-
-
+        branch  ...
 
     pop     current_char
 
