@@ -3,6 +3,7 @@
 # (c) JoBe, 2026
 
 
+import argparse
 import math
 
 
@@ -291,52 +292,70 @@ def _get_doc(pre: str, maxl: int, doc: str) -> str:
 
 
 
-def main(filename: str = "ascii") -> None:
-    res_h = PRE_C % __file__.replace("\\", "/").rsplit("/", 1)[-1]
+def main(filename: str = "ascii", c: bool = True, h: bool = True, j: bool = True) -> None:
+    if h:
+        res_h = PRE_C % __file__.replace("\\", "/").rsplit("/", 1)[-1]
 
-    for name, formula in FORMULAS_C.items():
-        res_h += gen_check_c(name, formula, decl=True)
+        for name, formula in FORMULAS_C.items():
+            res_h += gen_check_c(name, formula, decl=True)
 
-    with open(f"{filename}.h", "w") as file:
-        file.write(res_h)
+        with open(f"{filename}.h", "w") as file:
+            file.write(res_h)
+
+    if c:
+        res_c = PRE_C % __file__.replace("\\", "/").rsplit("/", 1)[-1]
+        res_c += gen_table_c(filename)
+        res_c += LOOKUP_FUNCTION_C
+
+        for name, formula in FORMULAS_C.items():
+            res_c += gen_check_c(name, formula, decl=False)
+
+        with open(f"{filename}.c", "w") as file:
+            file.write(res_c)
 
 
-    res_c = PRE_C % __file__.replace("\\", "/").rsplit("/", 1)[-1]
-    res_c += gen_table_c(filename)
-    res_c += LOOKUP_FUNCTION_C
+    if j:
+        modname = "gen_" + filename.replace("\\", "/").replace("/", "_").replace("-", "_")
 
-    for name, formula in FORMULAS_C.items():
-        res_c += gen_check_c(name, formula, decl=False)
+        res_jasm = PRE_JASM
+        res_jasm += gen_table_jasm()
+        res_jasm += LOOKUP_FUNCTION_JASM
 
-    with open(f"{filename}.c", "w") as file:
-        file.write(res_c)
+        for name, formula in FORMULAS_JASM.items():
+            res_jasm += gen_check_jasm(name, formula, decl=False)
 
+        res_jasm += "\n#DEFINE __%s_MODULE\n"
 
-    modname = "gen_" + filename.replace("\\", "/").replace("/", "_").replace("-", "_")
+        res_jasm %= (__file__.replace("\\", "/").rsplit("/", 1)[-1],
+                    modname, modname, modname)
 
-    res_jasm = PRE_JASM
-    res_jasm += gen_table_jasm()
-    res_jasm += LOOKUP_FUNCTION_JASM
+        maxl = max(len(f"    ;     *{INPUT_REG} (u8):"), len(f"    ;     *{OUTPUT_REG} (u8):"))
+        maxl = math.ceil(maxl / 4) * 4
 
-    for name, formula in FORMULAS_JASM.items():
-        res_jasm += gen_check_jasm(name, formula, decl=False)
-
-    res_jasm += "\n#DEFINE __%s_MODULE\n"
-
-    res_jasm %= (__file__.replace("\\", "/").rsplit("/", 1)[-1],
-                 modname, modname, modname)
-
-    maxl = max(len(f"    ;     *{INPUT_REG} (u8):"), len(f"    ;     *{OUTPUT_REG} (u8):"))
-    maxl = math.ceil(maxl / 4) * 4
-
-    with open(f"{filename}.jasm", "w") as file:
-        file.write(res_jasm.format(i=INPUT_REG,
-                                   o=OUTPUT_REG,
-                                   base_h=BASE_H,
-                                   base_l=BASE_L,
-                                   i_doc=_get_doc(f"    ;     *{INPUT_REG} (u8):", maxl, I_DOC),
-                                   o_doc=_get_doc(f"    ;     *{OUTPUT_REG} (u8):", maxl, O_DOC)))
+        with open(f"{filename}.jasm", "w") as file:
+            file.write(res_jasm.format(i=INPUT_REG,
+                                       o=OUTPUT_REG,
+                                       base_h=BASE_H,
+                                       base_l=BASE_L,
+                                       i_doc=_get_doc(f"    ;     *{INPUT_REG} (u8):",
+                                                      maxl, I_DOC),
+                                       o_doc=_get_doc(f"    ;     *{OUTPUT_REG} (u8):",
+                                                      maxl, O_DOC)))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("filename", default="chartype")
+
+    parser.add_argument("--c", action="store_true")
+    parser.add_argument("--h", action="store_true")
+    parser.add_argument("--j", "--jasm", action="store_true")
+
+    args = parser.parse_args()
+
+    if not args.c and not args.h and not args.j:
+        args.c = True
+        args.h = True
+        args.j = True
+
+    main(args.filename, args.c, args.h, args.j)
