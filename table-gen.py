@@ -14,6 +14,12 @@ PRE: str =\
 #include <stdint.h>
 
 
+"""
+
+
+TABLE: str =\
+"""#include "%s.h"
+
 
 static const uint8_t CHAR_TYPES[128] = {
     /*         0x_%s */
@@ -91,9 +97,9 @@ def uhex(n: int, bits: int = 2) -> str:
     return f"0x{"0" * (bits - hlen)}{hx.upper()}"
 
 
-def gen_table() -> str:
-    res = PRE
-    res %= __file__.replace("\\", "/").rsplit("/", 1)[-1], "  0x_".join(hex(col)[-1] for col in range(0, 16))
+def gen_table(filename: str) -> str:
+    res = TABLE
+    res %= filename, "  0x_".join(hex(col)[-1] for col in range(0, 16))
 
     for row in range(0, 8):
         res += "    /* 0x%s_ */ %s,\n"
@@ -122,13 +128,14 @@ def gen_check(kind: str, formula: str, decl: bool = False) -> str:
 
 
 def main(filename: str = "ascii") -> None:
-    table = gen_table()
-
-    res_h = table
+    res_h = PRE % __file__.replace("\\", "/").rsplit("/", 1)[-1]
     for name, formula in FORMULAS.items():
         res_h += gen_check(name, formula, decl=True)
 
-    res_c = table + LOOKUP_FUNCTION
+    res_c = PRE % __file__.replace("\\", "/").rsplit("/", 1)[-1]
+
+    res_c += gen_table(filename)
+    res_c += LOOKUP_FUNCTION
     for name, formula in FORMULAS.items():
         res_c += gen_check(name, formula, decl=False)
 
