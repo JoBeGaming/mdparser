@@ -235,7 +235,7 @@ def gen_table_jasm() -> str:
 
     src = ""
     for offset, value in values.items():
-        src += f"        rldi    {{base_h}} {{base_l}}+{uhex(offset)} {uhex(value)}\n"
+        src += f"        ldi     {uhex(offset)} {{i}}\n        rpre    {{base_h}} {{base_l}} {{i}}\n        rldi    @00 @00 {uhex(value)}\n"
 
     return TABLE_JASM.format(src=src)
 
